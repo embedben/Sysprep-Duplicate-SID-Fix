@@ -4,19 +4,18 @@
 
 .DESCRIPTION
     This script handles the entire sysprep /generalize workflow to fix duplicate SIDs:
-      1. Checks current SID
-      2. Copies unattend.xml to the Sysprep directory
-      3. Verifies TeamViewer is set to allow incoming LAN connections
-      4. Disables BitLocker if enabled (and waits for decryption)
-      5. Pauses Windows Update to prevent reserved storage conflicts
-      6. Removes known conflicting Appx packages
-      7. Runs sysprep, automatically retrying and removing any additional
-         conflicting packages that appear in the error log
+      1. Captures machine identity (hostname, timezone, SID) and prompts for admin password
+      2. Saves network configuration for restore after reboot
+      3. Generates and deploys unattend.xml with captured settings
+      4. Verifies TeamViewer is set to allow incoming LAN connections
+      5. Disables BitLocker if enabled (and waits for decryption)
+      6. Pauses Windows Update to prevent reserved storage conflicts
+      7. Runs sysprep, automatically retrying and removing any conflicting
+         packages that appear in the error log
       8. Machine reboots with a new SID; OOBE is fully bypassed via unattend.xml
 
 .NOTES
     Must be run as Administrator.
-    Must be run from the directory containing unattend.xml.
     Compatible with Windows 10 Pro and Windows 11 Pro.
 #>
 
@@ -29,11 +28,16 @@ param(
     # Skip the confirmation prompt and run immediately
     [switch]$Force,
 
-    # Path to unattend.xml (defaults to same directory as this script)
-    [string]$UnattendPath,
+    # Administrator password for the machine after sysprep (prompted if not specified)
+    [string]$AdminPassword,
+
+    # Hostname to assign after sysprep (auto-captured from current machine if not specified)
+    [string]$Hostname,
+
+    # Timezone (auto-captured from current machine if not specified)
+    [string]$TimeZone,
 
     # Network configuration overrides (auto-captured from current config if not specified)
-    # Pass these to override the current network settings after sysprep
     [string]$IPAddress,
     [string]$SubnetPrefix,
     [string]$Gateway,
@@ -86,31 +90,43 @@ Write-Host "============================================================" -Foreg
 Write-Host "  Sysprep SID Fix - Automated Remote Workflow" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
-# Determine unattend.xml location
-if (-not $UnattendPath) {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-    $UnattendPath = Join-Path $scriptDir "unattend.xml"
-}
-
-if (-not (Test-Path $UnattendPath)) {
-    Write-Fail "unattend.xml not found at: $UnattendPath"
-    Write-Fail "Place unattend.xml next to this script, or use -UnattendPath to specify its location."
-    exit 1
-}
-
 # ============================================================
-# Step 1: Show current SID
+# Step 1: Show current SID and gather machine identity
 # ============================================================
 
-Write-Step "Step 1: Current machine SID"
+Write-Step "Step 1: Current machine identity"
 
 $sidOutput = whoami /user /fo csv | ConvertFrom-Csv
 $currentSID = $sidOutput.SID
-# Machine SID is the user SID minus the last RID (the -500, -1001, etc.)
 $machineSID = $currentSID -replace '-\d+$', ''
 Write-Info "Current user SID : $currentSID"
 Write-Info "Machine SID      : $machineSID"
 Write-Info "Hostname         : $env:COMPUTERNAME"
+
+# Auto-capture hostname if not specified
+if (-not $Hostname) {
+    $Hostname = $env:COMPUTERNAME
+}
+Write-Info "Hostname (after) : $Hostname"
+
+# Auto-capture timezone if not specified
+if (-not $TimeZone) {
+    $TimeZone = (Get-TimeZone).Id
+}
+Write-Info "Timezone         : $TimeZone"
+
+# Prompt for admin password if not specified
+if (-not $AdminPassword) {
+    Write-Host ""
+    $securePass = Read-Host "  Enter Administrator password for after sysprep" -AsSecureString
+    $AdminPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)
+    )
+    if ([string]::IsNullOrWhiteSpace($AdminPassword)) {
+        Write-Fail "Password cannot be empty."
+        exit 1
+    }
+}
 
 # ============================================================
 # Confirmation
@@ -217,16 +233,165 @@ $dnsCommands
 }
 
 # ============================================================
-# Step 3: Copy unattend.xml to Sysprep directory
+# Step 3: Generate and deploy unattend.xml
 # ============================================================
 
-Write-Step "Step 3: Deploying unattend.xml"
+Write-Step "Step 3: Generating unattend.xml"
 
 $sysprepDir = Join-Path $env:SystemRoot "System32\Sysprep"
 $destPath = Join-Path $sysprepDir "unattend.xml"
 
-Copy-Item -Path $UnattendPath -Destination $destPath -Force
-Write-Success "Copied unattend.xml to $destPath"
+# Escape XML special characters in password
+$xmlPassword = $AdminPassword -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;' -replace "'","&apos;"
+
+$unattendXml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<unattend
+  xmlns="urn:schemas-microsoft-com:unattend"
+  xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <settings pass="specialize">
+
+    <component name="Microsoft-Windows-TerminalServices-LocalSessionManager"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <fDenyTSConnections>false</fDenyTSConnections>
+    </component>
+
+    <component name="Microsoft-Windows-Firewall"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <FirewallGroups>
+        <FirewallGroup wcm:action="add">
+          <Group>Remote Desktop</Group>
+          <Profile>all</Profile>
+          <Active>true</Active>
+        </FirewallGroup>
+      </FirewallGroups>
+    </component>
+
+    <component name="Microsoft-Windows-TerminalServices-RDP-WinStationExtensions"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <UserAuthentication>0</UserAuthentication>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <ComputerName>$Hostname</ComputerName>
+      <TimeZone>$TimeZone</TimeZone>
+    </component>
+
+  </settings>
+
+  <settings pass="oobeSystem">
+
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UILanguageFallback>en-US</UILanguageFallback>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+
+      <OOBE>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <ProtectYourPC>3</ProtectYourPC>
+        <NetworkLocation>Work</NetworkLocation>
+      </OOBE>
+
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <Password>
+          <Value>$xmlPassword</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <LogonCount>1</LogonCount>
+      </AutoLogon>
+
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>$xmlPassword</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>Administrator</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>$xmlPassword</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Restore network configuration if saved</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1') { &amp; 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1'; Remove-Item 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1' -Force }"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Set network profile to private</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Log new machine identity to desktop</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "`$info = @(); `$info += 'Sysprep completed: ' + (Get-Date).ToString(); `$info += 'Hostname: ' + `$env:COMPUTERNAME; `$info += 'SID: ' + (whoami /user /fo csv | ConvertFrom-Csv).SID; `$info += ''; `$info += 'IP Addresses:'; Get-NetIPAddress -AddressFamily IPv4 | Where-Object {`$_.IPAddress -ne '127.0.0.1'} | ForEach-Object { `$info += '  ' + `$_.InterfaceAlias + ': ' + `$_.IPAddress }; `$info += ''; `$info += 'TeamViewer ID:'; try { `$info += '  ' + (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer' -ErrorAction Stop).ClientID } catch { `$info += '  (TeamViewer not found or not yet initialized)' }; `$info | Out-File -FilePath ([Environment]::GetFolderPath('Desktop') + '\SysprepResult.txt') -Encoding UTF8"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Disable auto-logon after first use</Description>
+          <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+
+    </component>
+  </settings>
+
+</unattend>
+"@
+
+$unattendXml | Out-File -FilePath $destPath -Encoding UTF8 -Force
+Write-Success "Generated unattend.xml with captured settings"
+Write-Info "  Hostname : $Hostname"
+Write-Info "  Timezone : $TimeZone"
+Write-Info "  Password : ********"
+Write-Info "  Deployed to $destPath"
 
 # ============================================================
 # Step 4: Verify TeamViewer LAN connections setting
