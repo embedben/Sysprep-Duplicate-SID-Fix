@@ -5,9 +5,9 @@
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
   <!--
-    Sysprep Unattend - Duplicate SID Fix
-    Purpose: Fully bypass OOBE after sysprep /generalize so the PC
-             comes back online without any on-site intervention.
+    Sysprep Unattend - Duplicate SID Fix (REFERENCE TEMPLATE)
+    NOTE: The script generates this file dynamically. This copy is
+          kept as a reference only - editing it has no effect.
     Compatible with: Windows 10 Pro & Windows 11 Pro (22H2+)
   -->
 
@@ -57,9 +57,8 @@
                publicKeyToken="31bf3856ad364e35"
                language="neutral"
                versionScope="nonSxS">
-      <TimeZone>Central Standard Time</TimeZone>
-      <RegisteredOwner>TMH</RegisteredOwner>
-      <RegisteredOrganization>TMH</RegisteredOrganization>
+      <ComputerName>YOURPC</ComputerName>
+      <TimeZone>Eastern Standard Time</TimeZone>
     </component>
 
   </settings>
@@ -118,7 +117,7 @@
         <Enabled>true</Enabled>
         <Username>Administrator</Username>
         <Password>
-          <Value>tmh69!</Value>
+          <Value>CHANGE_ME</Value>
           <PlainText>true</PlainText>
         </Password>
         <LogonCount>1</LogonCount>
@@ -127,7 +126,7 @@
       <!-- Set the built-in Administrator account password -->
       <UserAccounts>
         <AdministratorPassword>
-          <Value>tmh69!</Value>
+          <Value>CHANGE_ME</Value>
           <PlainText>true</PlainText>
         </AdministratorPassword>
         <!-- Ensure the built-in Administrator account is enabled
@@ -137,7 +136,7 @@
             <Name>Administrator</Name>
             <Group>Administrators</Group>
             <Password>
-              <Value>tmh69!</Value>
+              <Value>CHANGE_ME</Value>
               <PlainText>true</PlainText>
             </Password>
           </LocalAccount>
