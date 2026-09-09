@@ -68,7 +68,14 @@ Before running, confirm the machines actually share a SID:
 whoami /user
 ```
 
-The SID is the long value starting with `S-1-5-21-...`. The machine SID is everything before the final dash and number (the RID). If two machines show the same `S-1-5-21-XXXXXXXXX-XXXXXXXXX-XXXXXXXXX` portion, the SIDs are duplicated.
+Compare the output from each machine. The SID will look something like:
+
+```
+S-1-5-21-1234567890-1234567890-1234567890-500
+|_____________machine SID_______________|  |_RID (ignore this part)
+```
+
+If the numbers before the last dash match across machines, the SIDs are duplicated.
 
 ## Notes
 
