@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend
+  xmlns="urn:schemas-microsoft-com:unattend"
+  xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <!--
+    Sysprep Unattend - Duplicate SID Fix
+    Purpose: Fully bypass OOBE after sysprep /generalize so the PC
+             comes back online without any on-site intervention.
+    Compatible with: Windows 10 Pro & Windows 11 Pro (22H2+)
+  -->
+
+  <!-- ============================================================
+       PASS 1: specialize
+       Runs after generalize, before OOBE. Sets up RDP, firewall,
+       computer name handling, and network profile.
+       ============================================================ -->
+  <settings pass="specialize">
+
+    <!-- Enable RDP so we can reconnect after reboot -->
+    <component name="Microsoft-Windows-TerminalServices-LocalSessionManager"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <fDenyTSConnections>false</fDenyTSConnections>
+    </component>
+
+    <!-- Allow RDP through firewall on all profiles -->
+    <component name="Microsoft-Windows-Firewall"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <FirewallGroups>
+        <FirewallGroup wcm:action="add">
+          <Group>Remote Desktop</Group>
+          <Profile>all</Profile>
+          <Active>true</Active>
+        </FirewallGroup>
+      </FirewallGroups>
+    </component>
+
+    <!-- Require NLA for RDP (security best practice, but still allows connection) -->
+    <component name="Microsoft-Windows-TerminalServices-RDP-WinStationExtensions"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <UserAuthentication>0</UserAuthentication>
+    </component>
+
+    <!-- Set timezone so Windows doesn't prompt for it -->
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <TimeZone>Central Standard Time</TimeZone>
+      <RegisteredOwner>TMH</RegisteredOwner>
+      <RegisteredOrganization>TMH</RegisteredOrganization>
+    </component>
+
+  </settings>
+
+  <!-- ============================================================
+       PASS 2: oobeSystem
+       Handles everything that would otherwise appear as an
+       interactive OOBE screen after first reboot.
+       ============================================================ -->
+  <settings pass="oobeSystem">
+
+    <!-- Locale settings - prevents region/keyboard prompts -->
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UILanguageFallback>en-US</UILanguageFallback>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+
+      <!-- OOBE bypass - belt and suspenders approach -->
+      <OOBE>
+        <!-- Skip the entire machine OOBE experience -->
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+
+        <!-- Hide individual OOBE pages (needed for Win 11 where SkipMachineOOBE is ignored) -->
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+
+        <!-- ProtectYourPC: 1=Recommended, 2=Custom, 3=Skip/Disable -->
+        <ProtectYourPC>3</ProtectYourPC>
+
+        <!-- Bypass the "Let's connect you to a network" screen (Win 11) -->
+        <NetworkLocation>Work</NetworkLocation>
+      </OOBE>
+
+      <!-- Auto-logon so the desktop loads without anyone typing a password.
+           This is CRITICAL for remote access - without it, the machine sits
+           at the lock screen and TeamViewer/RDP won't have a session to attach to.
+           LogonCount=1 means auto-logon happens once, then normal login resumes. -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <Password>
+          <Value>tmh69!</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <LogonCount>1</LogonCount>
+      </AutoLogon>
+
+      <!-- Set the built-in Administrator account password -->
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>tmh69!</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+        <!-- Ensure the built-in Administrator account is enabled
+             (sysprep /generalize can sometimes disable it) -->
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>Administrator</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>tmh69!</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <!-- First-logon script: log the new IP, hostname, and SID to a file
+           on the desktop so you can find it easily when you reconnect.
+           Also dismisses the "network discovery" prompt. -->
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Restore network configuration if saved</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1') { &amp; 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1'; Remove-Item 'C:\Windows\System32\Sysprep\RestoreNetwork.ps1' -Force }"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Set network profile to private (prevents discovery prompt)</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Log new machine identity to desktop</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$info = @(); $info += 'Sysprep completed: ' + (Get-Date).ToString(); $info += 'Hostname: ' + $env:COMPUTERNAME; $info += 'SID: ' + (whoami /user /fo csv | ConvertFrom-Csv).SID; $info += ''; $info += 'IP Addresses:'; Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -ne '127.0.0.1'} | ForEach-Object { $info += '  ' + $_.InterfaceAlias + ': ' + $_.IPAddress }; $info += ''; $info += 'TeamViewer ID:'; try { $info += '  ' + (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer' -ErrorAction Stop).ClientID } catch { $info += '  (TeamViewer not found or not yet initialized)' }; $info | Out-File -FilePath ([Environment]::GetFolderPath('Desktop') + '\SysprepResult.txt') -Encoding UTF8"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Disable auto-logon after first use</Description>
+          <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+
+    </component>
+  </settings>
+
+</unattend>
