@@ -43,11 +43,12 @@ After reboot, the machine comes back online with a new unique SID, the original 
 
 ## Usage
 
-```powershell
-# Basic — auto-captures hostname, timezone, network config; prompts for password
-.\Run-SysprepSIDFix.ps1
+The easiest way to run the tool is with the `.bat` launcher — right-click `Run-SysprepSIDFix.bat` and select **Run as administrator**. It handles execution policy and launches the script automatically.
 
-# Pre-specify password
+For advanced usage with parameters, run the `.ps1` script directly from an elevated PowerShell prompt:
+
+```powershell
+# Pre-specify password (skips the prompt)
 .\Run-SysprepSIDFix.ps1 -AdminPassword "YourPassword"
 
 # Override network config
