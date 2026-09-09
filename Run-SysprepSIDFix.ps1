@@ -378,6 +378,12 @@ $unattendXml = @"
           <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Description>Delete unattend.xml to remove plaintext password</Description>
+          <CommandLine>cmd.exe /c del /f /q "C:\Windows\System32\Sysprep\unattend.xml"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
       </FirstLogonCommands>
 
     </component>
