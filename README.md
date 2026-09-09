@@ -64,10 +64,11 @@ See [USAGE.md](USAGE.md) for the full parameter reference.
 
 Before running, confirm the machines actually share a SID:
 
-```powershell
-# Run on each machine — if the output matches, the SIDs are duplicated
-(whoami /user /fo csv | ConvertFrom-Csv).SID -replace '-\d+$', ''
 ```
+whoami /user
+```
+
+The SID is the long value starting with `S-1-5-21-...`. The machine SID is everything before the final dash and number (the RID). If two machines show the same `S-1-5-21-XXXXXXXXX-XXXXXXXXX-XXXXXXXXX` portion, the SIDs are duplicated.
 
 ## Notes
 
